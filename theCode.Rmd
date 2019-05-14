@@ -1,0 +1,704 @@
+---
+title: "C-NN"
+output: html_document
+---
+
+```{r,eval = TRUE}
+#Image Optimization
+library(imager)
+library(pbapply)
+
+extract_feature <- function(dir_path, width, height, classification, Train) {
+img_size <- width * height
+ 
+## List images in path
+images_names <- list.files(dir_path)
+ 
+print(paste("Start processing", length(images_names), "images"))
+## This function will resize an image, turn it into greyscale
+feature_list <- pblapply(images_names, function(imgname) {
+## Read image
+img <- load.image(file.path(dir_path, imgname))
+
+img_resized <- resize(img, width, height)
+
+graying <- channels(img_resized,3,drop = TRUE)
+
+array = as.array(graying$c.3)
+img_matrix = as.matrix(array)
+
+img_vector <- as.vector(t(img_matrix))
+return(img_vector)
+})
+## bind the list of vector into matrix
+feature_matrix <- do.call(rbind, feature_list)
+feature_matrix <- as.data.frame(feature_matrix)
+## Set names
+names(feature_matrix) <- paste0("pixel", c(1:img_size))
+if(Train == TRUE){
+feature_matrix$class = classification
+}
+return(feature_matrix)
+
+}
+
+xmirror <- function(dir_path, width, height, classification, Train) {
+img_size <- width * height
+ 
+## List images in path
+images_names <- list.files(dir_path)
+ 
+print(paste("Start processing", length(images_names), "images"))
+## This function will resize an image, turn it into greyscale
+feature_list <- pblapply(images_names, function(imgname) {
+## Read image
+img <- load.image(file.path(dir_path, imgname))
+
+img_resized <- resize(img, width, height)
+mirrorx = mirror(img_resized,"x")
+
+
+graying <- channels(mirrorx,3,drop = TRUE)
+array = as.array(graying$c.3)
+img_matrix = as.matrix(array)
+img_vector <- as.vector(t(img_matrix))
+
+return(img_vector)
+})
+## bind the list of vector into matrix
+feature_matrix <- do.call(rbind, feature_list)
+feature_matrix <- as.data.frame(feature_matrix)
+## Set names
+names(feature_matrix) <- paste0("pixel", c(1:img_size))
+if(Train == TRUE){
+feature_matrix$class = classification
+}
+return(feature_matrix)
+
+}
+
+ymirror <- function(dir_path, width, height, classification, Train) {
+img_size <- width * height
+ 
+## List images in path
+images_names <- list.files(dir_path)
+ 
+print(paste("Start processing", length(images_names), "images"))
+## This function will resize an image, turn it into greyscale
+feature_list <- pblapply(images_names, function(imgname) {
+## Read image
+img <- load.image(file.path(dir_path, imgname))
+
+img_resized <- resize(img, width, height)
+mirrory = mirror(img_resized,"y")
+
+graying <- channels(mirrory,3,drop = TRUE)
+
+array = as.array(graying$c.3)
+img_matrix = as.matrix(array)
+
+img_vector <- as.vector(t(img_matrix))
+return(img_vector)
+})
+## bind the list of vector into matrix
+feature_matrix <- do.call(rbind, feature_list)
+feature_matrix <- as.data.frame(feature_matrix)
+## Set names
+names(feature_matrix) <- paste0("pixel", c(1:img_size))
+if(Train == TRUE){
+feature_matrix$class = classification
+}
+return(feature_matrix)
+
+}
+
+
+
+
+#Optimizing The Images
+sail = extract_feature("SailboatTrain",115,345,0,TRUE)
+gon = extract_feature("GondolaTrain",115,345,1,TRUE)
+cruise = extract_feature("CruiseTrain",115,345,2,TRUE)
+
+sailMX = xmirror("SailboatTrain",115,345,0,TRUE)
+gonMX = xmirror("GondolaTrain",115,345,1,TRUE)
+cruiseMX = xmirror("CruiseTrain",115,345,2,TRUE)
+
+sailMY = ymirror("SailboatTrain",115,345,0,TRUE)
+gonMY = ymirror("GondolaTrain",115,345,1,TRUE)
+cruiseMY = ymirror("CruiseTrain",115,345,2,TRUE)
+
+data = rbind(sail,gon,cruise)
+augData = rbind(sail,gon,cruise,sailMX,sailMY,gonMX,gonMY,cruiseMX,cruiseMY)
+
+
+```
+```{r,eval = TRUE}
+#Creating Model
+library(keras)
+
+train_ids <- sample((1:598), size = floor(.80*598))
+train = data[train_ids,]
+test = data[-train_ids,]
+train_x = as.matrix(train[,1:ncol(data)-1])
+train_y = to_categorical(as.matrix(train$class),num_classes = 3)
+test_x = as.matrix(test[,c(1:ncol(data)-1)])
+test_y = to_categorical(as.matrix(test$class),num_classes = 3)
+model = keras_model_sequential()
+
+model %>% 
+  layer_dense(units = 1000, activation = 'relu',input_shape = c(39675)) %>%
+  layer_dropout(rate = 0.50) %>%
+  layer_dense(units = 1000, activation = 'relu') %>%
+  layer_dropout(rate = 0.25) %>%
+  layer_dense(units = 100098, activation = 'relu') %>%
+  layer_dense(units = c(3), activation = 'softmax')
+
+```
+```{r,eval = TRUE}
+#Compiling the Model
+model %>% compile(
+  loss = 'categorical_crossentropy',
+  optimizer = 'adam',
+  metrics = 'accuracy'
+)
+```
+```{r,eval = TRUE}
+#Running the Model
+history = model %>% fit(
+  train_x,
+  train_y,
+  epochs = 100,
+  batch_size = 10,
+  validation_split = .2
+)
+
+
+```
+```{r,eval = TRUE}
+#Plotting the Model
+
+plot(history$metrics$loss, ylim = range(c(0:15)),main = "Model Loss",xlab = "epoch",ylab ="loss",col = "purple",type = "l" )
+lines(history$metrics$val_loss,col = "pink")
+legend("bottomright", c("train","test"), col=c("purple", "blue"), lty=c(0.5,0.5))
+
+plot(history$metrics$acc, main = "Model Accuracy",xlab = "epoch",ylab = "accuracy",col = "purple",type = "l",ylim = (0:1))
+lines(history$metrics$val_acc,col = "blue")
+legend("bottomright", c("train","test"), col=c("purple", "blue"), lty=c(0.5,0.5))
+
+
+```
+```{r,eval = TRUE}
+#Assessing the Model
+
+classes = model %>% predict_classes(test_x,batch_size = 50)
+table(as.matrix(test$class),classes)
+
+score = model %>% evaluate(test_x,test_y,batch_size = 50)
+
+```
+
+```{r,eval = TRUE}
+
+#0.50 layer
+model1 = keras_model_sequential()
+model1 %>% 
+  layer_dense(units = 1000, activation = 'relu',input_shape = c(39675)) %>%
+  layer_dropout(rate = 0.50) %>%
+  layer_dense(units = 1000, activation = 'relu',input_shape = c(39675)) %>%
+  layer_dropout(rate = 0.50) %>%
+  layer_dense(units = 1000, activation = 'relu',input_shape = c(39675)) %>%
+  layer_dropout(rate = 0.50) %>%
+  layer_dense(units = c(3), activation = 'softmax')
+model1 %>% compile(
+  loss = 'categorical_crossentropy',
+  optimizer = 'adam',
+  metrics = 'accuracy'
+)
+history1 = model1 %>% fit(
+  train_x,
+  train_y,
+  epochs = 25,
+  batch_size = 10,
+  validation_split = .2
+)
+
+#0.30layer
+model2 = keras_model_sequential()
+model2 %>% 
+  layer_dense(units = 1000, activation = 'relu',input_shape = c(39675)) %>%
+  layer_dropout(rate = 0.30) %>%
+  layer_dense(units = 1000, activation = 'relu') %>%
+  layer_dropout(rate = 0.30) %>%
+  layer_dense(units = c(3), activation = 'softmax')
+model2 %>% compile(
+  loss = 'categorical_crossentropy',
+  optimizer = 'adam',
+  metrics = 'accuracy'
+)
+history2 = model2 %>% fit(
+  train_x,
+  train_y,
+  epochs = 25,
+  batch_size = 10,
+  validation_split = .2
+)
+# 0.10
+model3 = keras_model_sequential()
+model3 %>% 
+  layer_dense(units = 1000, activation = 'relu',input_shape = c(39675)) %>%
+  layer_dropout(rate = 0.10) %>%
+  layer_dense(units = 1000, activation = 'relu',input_shape = c(39675)) %>%
+  layer_dropout(rate = 0.10) %>%
+  layer_dense(units = 1000, activation = 'relu',input_shape = c(39675)) %>%
+  layer_dropout(rate = 0.10) %>%
+  layer_dense(units = c(3), activation = 'softmax')
+model3 %>% compile(
+  loss = 'categorical_crossentropy',
+  optimizer = 'adam',
+  metrics = 'accuracy'
+)
+history3 = model3 %>% fit(
+  train_x,
+  train_y,
+  epochs = 25,
+  batch_size = 10,
+  validation_split = .2
+)
+
+model4 = keras_model_sequential()
+model4 %>% 
+  layer_dense(units = 1000, activation = 'relu',input_shape = c(39675)) %>%
+  layer_dropout(rate = 0.90) %>%
+  layer_dense(units = 1000, activation = 'relu',input_shape = c(39675)) %>%
+  layer_dropout(rate = 0.90) %>%
+  layer_dense(units = 1000, activation = 'relu',input_shape = c(39675)) %>%
+  layer_dropout(rate = 0.90) %>%
+  layer_dense(units = c(3), activation = 'softmax')
+model4 %>% compile(
+  loss = 'categorical_crossentropy',
+  optimizer = 'adam',
+  metrics = 'accuracy'
+)
+history4 = model4 %>% fit(
+  train_x,
+  train_y,
+  epochs = 25,
+  batch_size = 10,
+  validation_split = .2
+)
+
+model5 = keras_model_sequential()
+model5 %>% 
+  layer_dense(units = 100, activation = 'relu',input_shape = c(39675)) %>%
+  layer_dropout(rate = 0.99) %>%
+  layer_dense(units = 100, activation = 'relu',input_shape = c(39675)) %>%
+  layer_dropout(rate = 0.9) %>%
+  layer_dense(units = 100, activation = 'relu',input_shape = c(39675)) %>%
+  layer_dropout(rate = 0.99) %>%
+  layer_dense(units = c(3), activation = 'softmax')
+model5 %>% compile(
+  loss = 'categorical_crossentropy',
+  optimizer = 'adam',
+  metrics = 'accuracy'
+)
+history5 = model5 %>% fit(
+  train_x,
+  train_y,
+  epochs = 25,
+  batch_size = 10,
+  validation_split = .2
+)
+
+
+
+plot(history1$metrics$val_loss, ylim = range(c(0:15)),main = "Pixel Model Loss",xlab = "epoch",ylab ="loss",col = "purple",type = "l" )
+lines(history2$metrics$val_loss, ylim = range(c(0:15)),col = "green",type = "l" )
+lines(history3$metrics$val_loss, ylim = range(c(0:15)),col = "red",type = "l" )
+lines(history4$metrics$val_loss, ylim = range(c(0:15)),col = " blue",type = "l" )
+lines(history5$metrics$val_loss, ylim = range(c(0:15)),col = " yellow",type = "l" )
+legend("bottomright", c("r=0.5 ","r=0.3","r=0.1","r=0.90","r=0.99"), col=c("purple", "green","red","blue","yellow"), lty=c(1,1))
+
+plot(history1$metrics$val_acc, ylim = range(c(0:1)),main = "Pixel Model Accuracy",xlab = "epoch",ylab ="loss",col = "purple",type = "l" )
+lines(history2$metrics$val_acc, ylim = range(c(0:1)),col = "green",type = "l" )
+lines(history3$metrics$val_acc, ylim = range(c(0:1)),col = "red",type = "l" )
+lines(history4$metrics$val_acc, ylim = range(c(0:1)),col = " blue",type = "l" )
+lines(history5$metrics$val_acc, ylim = range(c(0:1)),col = " yellow",type = "l" )
+legend("bottomright", c("r=0.5 ","r=0.3","r=0.1","r=0.90","r=0.99"), col=c("purple", "green","red","blue","yellow"), lty=c(1,1))
+
+
+
+
+
+```
+```{r,eval = TRUE}
+#Splitting X and Y, converting to classes for keras
+
+library(keras)
+train_ids <- sample((1:1794), size = floor(.80*1794))
+train = augData[train_ids,]
+test = augData[-train_ids,]
+train_x = as.matrix(train[,1:ncol(augData)-1])
+train_y = to_categorical(as.matrix(train$class),num_classes = 3)
+test_x = as.matrix(test[,1:ncol(augData)-1])
+test_y = to_categorical(as.matrix(test$class),num_classes = 3)
+
+```
+
+```{r,eval = TRUE}
+#Creating Model
+AugModel = keras_model_sequential()
+
+AugModel %>% 
+  layer_dense(units = 1000, activation = 'relu',input_shape = c(39675)) %>%
+  layer_dropout(rate = 0.25) %>%
+  layer_dense(units = 1000, activation = 'relu') %>%
+  layer_dropout(rate = 0.25) %>%
+  layer_dense(units = 1000, activation = 'relu') %>%
+  layer_dense(units = c(3), activation = 'softmax')
+
+```
+```{r,eval = TRUE}
+#Compiling the Model
+AugModel %>% compile(
+  loss = 'categorical_crossentropy',
+  optimizer = 'adam',
+  metrics = 'accuracy'
+)
+```
+```{r,eval = TRUE}
+#Running the Model
+AugHistory = AugModel %>% fit(
+  train_x,
+  train_y,
+  epochs = 60,
+  batch_size = 10,
+  validation_split = .2
+)
+
+
+```
+```{r,eval = TRUE}
+#Plotting the Model
+
+plot(AugHistory$metrics$loss, ylim = range(c(0:6)),main = "Model Loss",xlab = "epoch",ylab ="loss",col = "purple",type = "l" )
+lines(AugHistory$metrics$val_loss,col = "pink")
+legend("bottomright", c("train","test"), col=c("purple", "blue"), lty=c(0.5,0.5))
+
+plot(AugHistory$metrics$acc, main = "Model Accuracy",xlab = "epoch",ylab = "accuracy",col = "purple",type = "l",ylim = (0:1))
+lines(AugHistory$metrics$val_acc,col = "blue")
+legend("bottomright", c("train","test"), col=c("purple", "blue"), lty=c(0.5,0.5))
+
+
+```
+```{r,eval = TRUE}
+#Assessing the Model
+
+classes = AugModel %>% predict_classes(test_x,batch_size = 50)
+table(as.matrix(test$class),classes)
+
+score = AugModel %>% evaluate(test_x,test_y,batch_size = 50)
+
+```
+```{r,eval = TRUE}
+library(keras)
+dataClass = data$class
+datax = data[,1:ncol(data)-1]
+pca.out = prcomp(datax,scale = T)
+pca.result = data.frame(pca.out$x[,c(1:40)],class = dataClass)
+train_ids <- sample((1:598), size = floor(.80*598))
+train = pca.result[train_ids,]
+test = pca.result[-train_ids,]
+train_x = as.matrix(train[,1:40])
+train_y = to_categorical(as.matrix(train$class),num_classes = 3)
+test_x = as.matrix(test[,1:40])
+test_y = to_categorical(as.matrix(test$class),num_classes = 3)
+
+#0.50
+PCAModel1 = keras_model_sequential()
+
+PCAModel1 %>% 
+  layer_dense(units = 29, activation = 'relu',input_shape = c(40)) %>%
+  layer_dropout(rate = 0.50) %>%
+  layer_flatten() %>%
+  layer_dense(units = 29, activation = 'relu') %>%
+  layer_dropout(rate = 0.50) %>%
+  layer_dense(units = 29, activation = 'relu') %>%
+  layer_dense(units = c(3), activation = 'softmax')
+
+PCAModel1 %>% compile(
+  loss = 'categorical_crossentropy',
+  optimizer = 'adam',
+  metrics = 'accuracy'
+)
+
+PCAHistory1 = PCAModel1 %>% fit(
+  train_x,
+  train_y,
+  epochs = 60,
+  batch_size = 10,
+  validation_split = .2
+)
+
+#0.50
+PCAModel1 = keras_model_sequential()
+
+PCAModel1 %>% 
+  layer_dense(units = 29, activation = 'relu',input_shape = c(40)) %>%
+  layer_dropout(rate = 0.50) %>%
+  layer_flatten() %>%
+  layer_dense(units = 29, activation = 'relu') %>%
+  layer_dropout(rate = 0.50) %>%
+  layer_dense(units = 29, activation = 'relu') %>%
+  layer_dense(units = c(3), activation = 'softmax')
+
+PCAModel1 %>% compile(
+  loss = 'categorical_crossentropy',
+  optimizer = 'adam',
+  metrics = 'accuracy'
+)
+
+PCAHistory1 = PCAModel1 %>% fit(
+  train_x,
+  train_y,
+  epochs = 60,
+  batch_size = 10,
+  validation_split = .2
+)
+#0.30
+PCAModel2 = keras_model_sequential()
+
+PCAModel2 %>% 
+  layer_dense(units = 29, activation = 'relu',input_shape = c(40)) %>%
+  layer_dropout(rate = 0.30) %>%
+  layer_flatten() %>%
+  layer_dense(units = 29, activation = 'relu') %>%
+  layer_dropout(rate = 0.30) %>%
+  layer_dense(units = 29, activation = 'relu') %>%
+  layer_dense(units = c(3), activation = 'softmax')
+
+PCAModel2 %>% compile(
+  loss = 'categorical_crossentropy',
+  optimizer = 'adam',
+  metrics = 'accuracy'
+)
+
+PCAHistory2 = PCAModel2 %>% fit(
+  train_x,
+  train_y,
+  epochs = 60,
+  batch_size = 10,
+  validation_split = .2
+)
+
+PCAModel3 = keras_model_sequential()
+
+PCAModel3 %>% 
+  layer_dense(units = 29, activation = 'relu',input_shape = c(40)) %>%
+  layer_dropout(rate = 0.1) %>%
+  layer_flatten() %>%
+  layer_dense(units = 29, activation = 'relu') %>%
+  layer_dropout(rate = 0.1) %>%
+  layer_dense(units = 29, activation = 'relu') %>%
+  layer_dense(units = c(3), activation = 'softmax')
+
+PCAModel3 %>% compile(
+  loss = 'categorical_crossentropy',
+  optimizer = 'adam',
+  metrics = 'accuracy'
+)
+
+PCAHistory3 = PCAModel3 %>% fit(
+  train_x,
+  train_y,
+  epochs = 60,
+  batch_size = 10,
+  validation_split = .2
+)
+PCAModel4 = keras_model_sequential()
+
+PCAModel4 %>% 
+  layer_dense(units = 29, activation = 'relu',input_shape = c(40)) %>%
+  layer_dropout(rate = 0.1) %>%
+  layer_flatten() %>%
+  layer_dense(units = 29, activation = 'relu') %>%
+  layer_dropout(rate = 0.1) %>%
+  layer_dense(units = 29, activation = 'relu') %>%
+  layer_dense(units = c(3), activation = 'softmax')
+
+PCAModel4 %>% compile(
+  loss = 'categorical_crossentropy',
+  optimizer = 'adam',
+  metrics = 'accuracy'
+)
+
+PCAHistory4 = PCAModel4 %>% fit(
+  train_x,
+  train_y,
+  epochs = 60,
+  batch_size = 10,
+  validation_split = .2
+)
+
+PCAModel5 = keras_model_sequential()
+
+PCAModel5%>% 
+  layer_dense(units = 29, activation = 'relu',input_shape = c(40)) %>%
+  layer_dropout(rate = 0.99) %>%
+  layer_flatten() %>%
+  layer_dense(units = 29, activation = 'relu') %>%
+  layer_dropout(rate = 0.99) %>%
+  layer_dense(units = 29, activation = 'relu') %>%
+  layer_dense(units = c(3), activation = 'softmax')
+
+PCAModel5 %>% compile(
+  loss = 'categorical_crossentropy',
+  optimizer = 'adam',
+  metrics = 'accuracy'
+)
+
+PCAHistory5 = PCAModel5 %>% fit(
+  train_x,
+  train_y,
+  epochs = 60,
+  batch_size = 10,
+  validation_split = .2
+)
+
+
+
+plot(PCAHistory1$metrics$val_loss,main = "PC Model Loss",xlab = "epoch",ylab ="loss",col = "purple",type = "l",ylim = range(c(0:10))  )
+lines(PCAHistory2$metrics$val_loss,col = "green",ylim = c(0:20))
+lines(PCAHistory3$metrics$val_loss,col = "red")
+lines(PCAHistory4$metrics$val_loss,col = "blue")
+lines(PCAHistory5$metrics$val_loss,col = "yellow")
+
+legend("bottomright", c("r=0.5 ","r=0.3","r=0.1","r=0.90","r=0.99"), col=c("purple", "green","red","blue","yellow"), lty=c(1,1))
+
+plot(PCAHistory1$metrics$val_acc,main = "PC Model Accuracy",xlab = "epoch",ylab ="loss",col = "purple",type = "l",ylim = range(c(0:1))  )
+lines(PCAHistory2$metrics$val_acc,col = "green",ylim = c(0:20))
+lines(PCAHistory3$metrics$val_acc,col = "red")
+lines(PCAHistory4$metrics$val_acc,col = "blue")
+lines(PCAHistory5$metrics$val_acc,col = "yellow")
+
+legend("bottomright", c("r=0.5 ","r=0.3","r=0.1","r=0.90","r=0.99"), col=c("purple", "green","red","blue","yellow"), lty=c(1,1))
+
+classes = PCAModel3 %>% predict_classes(test_x,batch_size = 50)
+table(as.matrix(test$class),classes)
+
+score = PCAModel5 %>% evaluate(test_x,test_y,batch_size = 50)
+
+
+```
+```{r,eval = TRUE}
+library(keras)
+dataClass = augData$class
+datax = augData[,1:ncol(augData)-1]
+pca.out = prcomp(datax,scale = T)
+pca.result = data.frame(pca.out$x[,1:40],class = dataClass)
+train_ids <- sample((1:1794), size = floor(.80*1794))
+train = pca.result[train_ids,]
+test = pca.result[-train_ids,]
+train_x = as.matrix(train[,1:40])
+train_y = to_categorical(as.matrix(train$class),num_classes = 3)
+test_x = as.matrix(test[,1:40])
+test_y = to_categorical(as.matrix(test$class),num_classes = 3)
+
+augPCAModel = keras_model_sequential()
+
+augPCAModel %>% 
+  layer_dense(units = 29, activation = 'relu',input_shape = c(40)) %>%
+  layer_dropout(rate = 0.3) %>%
+  layer_flatten() %>%
+  layer_dense(units = 29, activation = 'relu') %>%
+  layer_dropout(rate = 0.3) %>%
+  layer_dense(units = 29, activation = 'relu') %>%
+  layer_dense(units = c(3), activation = 'softmax')
+
+augPCAModel %>% compile(
+  loss = 'categorical_crossentropy',
+  optimizer = 'adam',
+  metrics = 'accuracy'
+)
+
+augPCAHistory = augPCAModel %>% fit(
+  train_x,
+  train_y,
+  epochs = 20,
+  batch_size = 10,
+  validation_split = .2
+)
+
+plot(augPCAHistory$metrics$loss, ylim = range(c(0:6)),main = "Model Loss",xlab = "epoch",ylab ="loss",col = "purple",type = "l" )
+lines(augPCAHistory$metrics$val_loss,col = "pink")
+legend("bottomright", c("train","test"), col=c("purple", "blue"), lty=c(0.5,0.5))
+
+plot(augPCAHistory$metrics$acc, main = "Model Accuracy",xlab = "epoch",ylab = "accuracy",col = "purple",type = "l",ylim = (0:1))
+lines(augPCAHistory$metrics$val_acc,col = "blue")
+legend("bottomright", c("train","test"), col=c("purple", "blue"), lty=c(0.5,0.5))
+
+classes = augPCAModel %>% predict_classes(test_x,batch_size = 50)
+table(as.matrix(test$class),classes)
+
+score = augPCAModel %>% evaluate(test_x,test_y,batch_size = 50)
+
+
+```
+
+```{r,eval = TRUE}
+
+data = read.csv("edge_pixels.csv")
+dataClass = data$class
+pca.result = data[,2:ncol(data)]
+train_ids <- sample((1:598), size = floor(.80*598))
+train = pca.result[train_ids,]
+test = pca.result[-train_ids,]
+train_x = as.matrix(train[,1:40])
+train_y = to_categorical(as.matrix(train$class),num_classes = 3)
+test_x = as.matrix(test[,1:40])
+test_y = to_categorical(as.matrix(test$class),num_classes = 3)
+
+edgePCAModel = keras_model_sequential()
+
+edgePCAModel %>% 
+  layer_dense(units = 29, activation = 'relu',input_shape = c(40)) %>%
+  layer_dropout(rate = 0.25) %>%
+  layer_flatten() %>%
+  layer_dense(units = 29, activation = 'relu') %>%
+  layer_dropout(rate = 0.25) %>%
+  layer_dense(units = 29, activation = 'relu') %>%
+  layer_dense(units = c(3), activation = 'softmax')
+
+edgePCAModel %>% compile(
+  loss = 'categorical_crossentropy',
+  optimizer = 'adam',
+  metrics = 'accuracy'
+)
+
+edgePCAHistory = edgePCAModel %>% fit(
+  train_x,
+  train_y,
+  epochs = 60,
+  batch_size = 10,
+  validation_split = .2
+)
+
+plot(edgePCAHistory$metrics$loss, ylim = range(c(0:6)),main = "Model Loss",xlab = "epoch",ylab ="loss",col = "purple",type = "l" )
+lines(edgePCAHistory$metrics$val_loss,col = "pink")
+legend("bottomright", c("train","test"), col=c("purple", "blue"), lty=c(0.5,0.5))
+
+plot(edgePCAHistory$metrics$acc, main = "Model Accuracy",xlab = "epoch",ylab = "accuracy",col = "purple",type = "l",ylim = (0:1))
+lines(edgePCAHistory$metrics$val_acc,col = "blue")
+legend("bottomright", c("train","test"), col=c("purple", "blue"), lty=c(0.5,0.5))
+
+classes = edgePCAModel %>% predict_classes(test_x,batch_size = 50)
+table(as.matrix(test$class),classes)
+
+score = edgePCAModel %>% evaluate(test_x,test_y,batch_size = 50)
+
+
+```
+
+
+
+```
